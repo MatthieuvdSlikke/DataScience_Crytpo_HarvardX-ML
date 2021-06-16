@@ -25,8 +25,6 @@ if(!require(rtweet)) install.packages("rtweet", repos =
 if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics", repos =
                                         "http://cran.us.r-project.org")
 if(!require(xts)) install.packages("xts", repos ="http://cran.us.r-project.org")
-if(!require(tidyquant)) install.packages("tidyquant", repos ="http://cran.us.r-project.org")
-
 
 library(tidyverse)
 library(dplyr)
@@ -40,7 +38,6 @@ library(textdata)
 library(rtweet)
 library(PerformanceAnalytics)
 library(xts)
-library(tidyquant)
 
 
 # Options_KR dataset:
@@ -255,13 +252,42 @@ cor(x=all_prices_total_ret$Open_appl,y=all_prices_total_ret$Open_amz)
 #let's check with price 
 all_prices_only_total <- bitcoin %>% select(date,Open) 
 all_prices_only_total <- right_join(all_prices_only_total, all_prices, by='date') %>% mutate(Open=as.numeric(Open))
-
 view(all_prices_only_total)
+
+log(all_prices_total$Open)
+typeof(all_prices_only_total$Open)
 
 all_prices_only_total %>% ggplot(aes(x=date)) + geom_line(aes(y=log(Open)), colour="red") + geom_line(aes(y=(log(Open_tsla)+log(Open_appl)+log(Open_gld)+log(Open_fb)+log(Open_amz))/5), colour="green")
 
+#crypto currencies
 
-names(all_prices_only_total)
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/DOGE-USD.csv", dl, method = "curl")
+doge <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+doge <- doge %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
+  filter(date <= '2021-04-17') %>% filter(Open!="null") %>% mutate(Open_doge= as.numeric(Open)) %>% select(date,Open_doge)
 
 
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/ETH-USD.csv", dl, method = "curl")
+ethereum <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+ethereum  <- ethereum %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
+  filter(date <= '2021-04-17') %>% filter(Open!="null") %>% mutate(Open_eth= as.numeric(Open)) %>% select(date,Open_eth)
+view(ethereum)
+
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/LTC-USD.csv", dl, method = "curl")
+litecoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+litecoin <- litecoin %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
+  filter(date <= '2021-04-17')  %>% filter(Open!="null") %>% mutate(Open_ltc= as.numeric(Open)) %>% select(date,Open_ltc)
+
+crypto <- right_join(doge, ethereum, by='date') %>% left_join(.,litecoin, by='date')
+crypto <- right_join(bitcoin%>%select(date,Open), crypto, by='date')
+view(crypto)
+cor(x=log(crypto$Open),y=log(crypto$Open_doge))
+cor(x=log(crypto$Open),y=log(crypto$Open_eth))
+cor(x=log(crypto$Open),y=log(crypto$Open_ltc))
+
+#they almost have the exact same line 
+crypto %>% ggplot(aes(x=date)) + geom_line(aes(y=log(Open)), colour="red") + geom_line(aes(y=(log(Open_doge)+log(Open_eth)+log(Open_ltc))/3), colour="green")
 
