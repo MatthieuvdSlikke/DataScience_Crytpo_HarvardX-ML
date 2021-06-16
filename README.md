@@ -26,3 +26,13 @@ https://finance.yahoo.com/quote/TSLA/history?p=TSLA
 
 Gold:
 https://au.finance.yahoo.com/quote/GC%3DF/history
+
+Ethereum USD:
+https://finance.yahoo.com/quote/ETH-USD/history
+
+Dogecoin USD:
+https://finance.yahoo.com/quote/DOGE-USD/history
+
+Litecoin USD (LTC-USD):
+https://finance.yahoo.com/quote/LTC-USD/history
+
