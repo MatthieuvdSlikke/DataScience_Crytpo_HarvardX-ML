@@ -8,8 +8,8 @@ if(!require(tidyverse)) install.packages("tidyverse", repos =
                                            "http://cran.us.r-project.org")
 if(!require(tidyverse)) install.packages("dplyr", repos =
                                            "http://cran.us.r-project.org")
-if(!require(caret)) install.packages("caret",
-                                     repos = "http://cran.r-project.org")
+if(!require(caret)) install.packages("caret",repos = 
+                                       "http://cran.r-project.org")
 if(!require(data.table)) install.packages("data.table", repos =
                                             "http://cran.us.r-project.org")
 if(!require(lubridate)) install.packages("lubridate", repos =
@@ -23,8 +23,12 @@ if(!require(textdata)) install.packages("textdata", repos =
 if(!require(rtweet)) install.packages("rtweet", repos =
                                           "http://cran.us.r-project.org")
 if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics", repos =
-                                        "http://cran.us.r-project.org")
-if(!require(xts)) install.packages("xts", repos ="http://cran.us.r-project.org")
+                                                      "http://cran.us.r-project.org")
+if(!require(xts)) install.packages("xts", repos =
+                                     "http://cran.us.r-project.org")
+if(!require(quantmod)) install.packages("quantmod", repos =
+                                          "http://cran.us.r-project.org")
+
 
 library(tidyverse)
 library(dplyr)
@@ -38,9 +42,10 @@ library(textdata)
 library(rtweet)
 library(PerformanceAnalytics)
 library(xts)
+library(quantmod)
 
 
-# Options_KR dataset:
+# elon musks tweets dataset:
 # https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/TweetsElonMusk.csv
 
 dl <- tempfile()
@@ -214,14 +219,76 @@ Returns_all[is.na(Returns_all)] <-  0
 view(Returns_all)
 
 
-#volatility way bigger for bitcoin
+#volatility way bigger for bitcoin annualized
 sd(Returns)*sqrt(252)
 sd(Returns_all)*sqrt(252)
 
+#plot returns
+plot.xts(Returns)
+
+#chart check the volatility per month
+chart.RollingPerformance(R=Returns,
+                         width=30,
+                         FUN="sd.annualized",
+                         scale=252,
+                         main="Rolling 1 month volatility")
+
+
+#set parameter values
+alpha <- 0.1
+beta <- 0.8
+omega <- var(Returns)*(1-alpha-beta)
+
+#set series of prediction error
+e <- Returns- mean(Returns)
+e2 <- e^2
+
+#we predict for each observation its variance
+nobs <- length(Returns)
+predvar <- rep(NA, nobs)
+
+#initialize the process at the sample variance
+predvar[1] <- var(Returns)
+
+#loop starting at 2 because of the lagged predictor
+for(t in 2:nobs){
+  predvar[t] <- omega + alpha * e2[t-1] + beta*predvar[t-1]
+}
+
+#volatility is sqrt of predicted variance
+predvol <- sqrt(predvar)
+predvol <- xts(predvol, order.by=time(Returns))
+view(predvol)
+
+#we compare with the unconditional volatility
+uncvol <- sqrt(omega/(1-alpha-beta))
+uncvol <- xts(rep(uncvol,nobs), order.by=time(Returns))
+view(uncvol)
+
+#plot
+plot.xts(predvol)
+lines(uncvol, col="red", lwd=2) #below or above average volatility
+
+
+# rolling vol
+# https://stackoverflow.com/questions/12823445/faster-way-of-calculating-rolling-realized-volatility-in-r
+realized_vol <- xts(apply(Returns,2,runSD,n=30), index(Returns))*sqrt(252)
+view(realized_vol)
+realizedvol <- rollapply(Returns, width = 30, FUN=sd.annualized)
+view(realizedvol)
+
+
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+
+plot.xts(realized_vol)
+plot.xts(realizedvol)
+
+
 ret <- data.frame(date=index(Returns_all), coredata(Returns_all)) %>% mutate(date=as.Date(date))
-
 view(ret)
-
 all_prices_total_ret <- right_join(total, ret, by='date') 
 all_prices_total_ret <- all_prices_total_ret %>% mutate(dir_appl= ifelse(Open_appl>=0,1,-1),
                                                         dir_fb= ifelse(Open_fb>=0,1,-1),
@@ -287,7 +354,14 @@ view(crypto)
 cor(x=log(crypto$Open),y=log(crypto$Open_doge))
 cor(x=log(crypto$Open),y=log(crypto$Open_eth))
 cor(x=log(crypto$Open),y=log(crypto$Open_ltc))
+cor(x=log(crypto$Open),y=(log(crypto$Open_doge)+log(crypto$Open_eth)+log(crypto$Open_ltc))/3)
 
-#they almost have the exact same line 
+cor(x=crypto$Open,y=crypto$Open_doge)
+cor(x=crypto$Open,y=crypto$Open_eth)
+cor(x=log(crypto$Open),y=log(crypto$Open_ltc)
+cor(x=crypto$Open,y=(crypto$Open_doge+crypto$Open_eth+crypto$Open_ltc)/3)
+
+
+#they almost have the exact same line and peaks are shifted to the right for the green line
 crypto %>% ggplot(aes(x=date)) + geom_line(aes(y=log(Open)), colour="red") + geom_line(aes(y=(log(Open_doge)+log(Open_eth)+log(Open_ltc))/3), colour="green")
 

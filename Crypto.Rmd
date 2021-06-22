@@ -1,0 +1,119 @@
+---
+title: "MovieLens Recommendation System Project"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+
+# Introduction
+\pagebreak
+
+## Objective
+
+The goal of this project will be to create a model that the future volatility of bitcoin price. 
+
+>>> here I need to explain what is volatility and why it is so important. 
+
+To calculate the accuracy of our algorithm, we will use a loss function called the residual mean squared error or RMSE on a test set. The RMSE is defined as follow:
+$$ RMSE = \sqrt{\frac{1}{N}\displaystyle\sum_{i} (\hat{y}_{i}-y_{i})^{2}} $$
+Where $ y_{i} $ represents the true daily volatility for bitcoin at day $i$, and $ \hat{i} $ denotes the predicted daily volatility for bitcoin at day $i$.
+
+```{r, echo=TRUE}
+#RMSE function 
+RMSE <- function(true_volatility, predicted_volatility){
+  sqrt(mean((true_volatility - predicted_volatility)^2))
+}
+```
+
+Our aim we will be to develop an algorithm with the smallest RMSE possible.  
+
+In order to create this algorithm, we will need to first separate the data into two different sets one for training and one for testing. Then we will explore and analyse the data, develop methods to predict volatility, compare the different methods using the results and finally conclude which one is the best algorithm. 
+
+\pagebreak
+
+## Dataset
+
+For this research we will download multiple cryptocurrency datasets, that I have downloaded from the . 
+This code also adds libraries that we will be using to conduct analysis and splits the data into two different sets, one for training, the edx dataset, and one for testing, the validation dataset.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+##########################################################
+# Create edx set, validation set (final hold-out test set)
+##########################################################
+
+# Note: this process could take a couple of minutes
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret",repos = "http://cran.r-project.org")
+if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics", repos = "http://cran.us.r-project.org")
+if(!require(xts)) install.packages("xts", repos = "http://cran.us.r-project.org")
+if(!require(rugarch)) install.packages("rugarch", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+
+library(tidyverse)
+library(dplyr)
+library(caret)
+library(PerformanceAnalytics)
+library(xts)
+library(rugarch)
+library(randomForest)
+
+#downloading the cryptos data
+
+#bitcoin
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/BTC-USD.csv", dl, method = "curl")
+bitcoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+bitcoin <- bitcoin %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open= as.numeric(Open), Volume=as.numeric(Volume)) %>% 
+  select(Date,Open,Volume)
+
+#dogecoin
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/DOGE-USD.csv", dl, method = "curl")
+doge <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+doge <- doge %>% 
+  mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_dgc= as.numeric(Open), Volume_dgc=as.numeric(Volume)) %>% 
+  select(Date,Open_dgc,Volume_dgc)
+
+#ethereum
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/ETH-USD.csv", dl, method = "curl")
+ethereum <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+ethereum  <- ethereum %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_eth= as.numeric(Open), Volume_eth=as.numeric(Volume)) %>% 
+  select(Date,Open_eth,Volume_eth)
+
+#litecoin
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/LTC-USD.csv", dl, method = "curl")
+litecoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+litecoin <- litecoin %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>%
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_ltc= as.numeric(Open), Volume_ltc=as.numeric(Volume)) %>% 
+  select(Date,Open_ltc,Volume_ltc)
+```
+
+\pagebreak
+
+# Methods and Analysis
+
+## Data Exploration and Cleaning
+
+### Overview
