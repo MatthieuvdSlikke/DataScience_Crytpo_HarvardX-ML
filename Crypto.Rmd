@@ -1,10 +1,14 @@
 ---
 title: "MovieLens Recommendation System Project"
 output:
+  html_document:
+    toc: yes
+    toc_depth: '3'
+    df_print: paged
   pdf_document:
-    toc: true
+    toc: yes
     toc_depth: 3
-    number_sections: true
+    number_sections: yes
 ---
 
 
@@ -13,13 +17,14 @@ output:
 
 ## Objective
 
-The goal of this project will be to create a model that the future volatility of bitcoin price. 
+The goal of this project will be to create a model that predicts the future conditional volatility of bitcoin price for the next 30 days. Volatility is a statistical measure that indicates the dispersion of daily returns at time t, think daily returns as the money made or lost at the end of the day if you had owned bitcoins. Predicting volatility is a key calculation for traders as it helps them evaluate how risky a commodity is in time, and base their trades on it. 
 
->>> here I need to explain what is volatility and why it is so important. 
+We will measure this volatility per day by calculating the conditional standard deviation at time t of bitcoins daily returns using the GARCH(1,1) model. GARCH stands for Generalized AutoRegressive Conditional Heteroskedasticity, it is a statistic model that was created by economics nobelist Robert F. Engle, to help estimate volatility. We will then apply different machine learning models to our predictions to better estimate the volatility.
+
 
 To calculate the accuracy of our algorithm, we will use a loss function called the residual mean squared error or RMSE on a test set. The RMSE is defined as follow:
-$$ RMSE = \sqrt{\frac{1}{N}\displaystyle\sum_{i} (\hat{y}_{i}-y_{i})^{2}} $$
-Where $ y_{i} $ represents the true daily volatility for bitcoin at day $i$, and $ \hat{i} $ denotes the predicted daily volatility for bitcoin at day $i$.
+$$ RMSE = \sqrt{\frac{1}{N}\displaystyle\sum_{t} (\hat{y}_{t}-y_{t})^{2}} $$
+Where $ y_{t} $ represents the true daily volatility for bitcoin at day $t$, and $ \hat{t} $ denotes the predicted daily volatility for bitcoin at day $t$.
 
 ```{r, echo=TRUE}
 #RMSE function 
@@ -36,8 +41,9 @@ In order to create this algorithm, we will need to first separate the data into 
 
 ## Dataset
 
-For this research we will download multiple cryptocurrency datasets, that I have downloaded from the . 
-This code also adds libraries that we will be using to conduct analysis and splits the data into two different sets, one for training, the edx dataset, and one for testing, the validation dataset.
+For this research we will download multiple cryptocurrencies' financial datasets, that I have collected from yahoo and added to my personal github. It is composed of four different cryptocurrencies to USD datasets: bitcoin, dogecoin, ethereum and litecoin.
+
+This code also adds libraries that we will be using to conduct analysis.
 
 ```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
 ##########################################################
@@ -53,12 +59,14 @@ if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics", repo
 if(!require(xts)) install.packages("xts", repos = "http://cran.us.r-project.org")
 if(!require(rugarch)) install.packages("rugarch", repos = "http://cran.us.r-project.org")
 if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
 
 library(tidyverse)
 library(dplyr)
 library(caret)
 library(PerformanceAnalytics)
 library(xts)
+library(lubridate)
 library(rugarch)
 library(randomForest)
 
@@ -117,3 +125,242 @@ litecoin <- litecoin %>% mutate(Date=as.Date(Date)) %>%
 ## Data Exploration and Cleaning
 
 ### Overview
+
+Firstly we will join all the data into one table and then separate it into two different tables: the test set and the validation set. Since we will want to predict the volatility for the next 30days, we will define the test set as the validation set minus the last the 30 days. For simplicity, we will only use the open prices to calculate the daily returns and the volatility. In the joined table, I have also added a fourth feature: Open_all_coins, which represents the average open price of the sum of dogecoin, ethereum and litecoin.
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+#table joined together by Date
+crypto <- inner_join(doge, ethereum, by='Date') %>% inner_join(.,litecoin, by='Date')%>% inner_join(.,bitcoin, by='Date')
+
+#selecting all open prices of coins and take the average price of all the other coins than bitcoin
+validation_set <- crypto %>% select(Date,Open,Open_dgc,Open_eth,Open_ltc) %>% mutate(Open_all_coins =(Open_dgc+Open_eth+Open_ltc)/3)
+
+#test set
+test_set <- validation_set %>% slice_head(n=nrow(validation_set)-30)
+```
+
+Here is what the first 6 data points look like:
+```{r head, echo=FALSE}
+head(test_set)
+```
+
+```{r dimension, echo=TRUE}
+dim(test_set)
+```
+
+We can see that there are 2097 days of data and 6 columns: "Date", "Open",the open price of bitcoin, Open_dgc" for dogecoin, "Open_eth" for ethereum, "Open_ltc" for litecoin, and "Open_all_coins".
+
+### Exploration
+
+Let's first check the evolution of the bitcoin price compared to the other crypto currencies.
+```{r, echo=FALSE}
+colors <- c("Bitcoin" = "green", "Dogecoin" = "orange", "Ethereum" = "purple", "Litecoin"="blue", "Crypto Average"="pink")
+```
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=(Open), color="Bitcoin")) + geom_line(aes(y=(Open_dgc), color="Dogecoin")) + geom_line(aes(y=(Open_eth), color="Ethereum")) + geom_line(aes(y=(Open_ltc), color="Litecoin")) + geom_line(aes(y=(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Open Prices", color = "Legend") + scale_color_manual(values = colors) + 
+  geom_vline(xintercept=as.numeric(c(ymd("2017-12-30"),ymd("2021-05-01"))),size=1.5, colour="red", alpha=0.1)
+```
+As we can see above, the bitcoin price is so high that the evolution of the other cryptocurrencies seem negligeable. However if we look closer, at the beginning of 2018 and the mid 2021, Bitcoin and the other cryptocurrencies seem to peak at the same time. Let's further analyze, the evolution of those currencies by plotting their log transformations.
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_dgc), color="Dogecoin")) + geom_line(aes(y=log(Open_eth), color="Ethereum")) + geom_line(aes(y=log(Open_ltc), color="Litecoin")) + geom_line(aes(y=log(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors)
+```
+
+As expected, we can observe from the log transformations, that the three cryptocurrencies follow approximately the same trend as bitcoin. We can see that particularly with the average sum change in price of the three cryptocurrencies and bitcoin when we overlay the two timeseries below.
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average Shifted Up")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
+```
+
+We can also observe a strong correlation between bitcoins and all the other cryptocurrencies.
+```{r, echo=FALSE,message = FALSE, warning = FALSE}
+#correlations
+cor_results <- data_frame(method = c("BTC-DGC",
+                                      "BTC-LTC",
+                                      "BTC-ALL",
+                                      "BTC-ETH"),
+                           correlations = c(cor(test_set$Open, test_set$Open_dgc),
+                                            cor(test_set$Open, test_set$Open_ltc),
+                                            cor(test_set$Open, test_set$Open_all_coins),
+                                            cor(test_set$Open,test_set$Open_eth)))
+cor_results %>% knitr::kable()
+```
+
+### Data preparation and cleaning
+In order to apply the GARCH(1,1) model, we need to first calculate all the average daily returns $R_{t}$ at day $t$: 
+$$  R_{t}=\frac{P_{t}-P_{t-1}}{P_{t}}$$
+where $ P_{t}$ is the price $P$ at day $t$, and $ P_{t-1}$ the price P from at day $t-1$ (ie: or the previous day).
+
+We will use a function to calculate the average daily returns CalculateReturns() from the PerformanceAnalytics package, but first we need to convert our dataframes into timeseries. 
+
+```{r, echo=TRUE}
+#transform into a time series
+validation_xts <- as.xts(validation_set[, -1], order.by = validation_set$Date, dateFormat="POSIXct")
+test_set_xts <- as.xts(test_set[, -1], order.by = test_set$Date, dateFormat="POSIXct")
+
+#calculate all the returns
+Returns_validation <- CalculateReturns(validation_xts)
+Return_test <- CalculateReturns(test_set_xts)
+
+#remove the first line as the first entry does not exist.
+Returns_validation <- Returns_validation[-1,]
+Return_test <- Return_test[-1,]
+head(Return_test)
+```
+
+The data is then split into different time series, which will help us later in applying our GARCH(1,1) model. 
+```{r , echo=TRUE}
+#seperate data 
+bitcoin_xts <- Returns_validation$Open
+dogecoin_xts <- Returns_validation$Open_dgc
+ethereum_xts <- Returns_validation$Open_eth
+litecoin_xts <- Returns_validation$Open_ltc
+all_coins_xts <- Returns_validation$Open_all_coins
+
+bitcoin_test_xts <- Return_test$Open
+dogecoin_test_xts <- Return_test$Open_dgc
+ethereum_test_xts <- Return_test$Open_eth
+litecoin_test_xts <- Return_test$Open_ltc
+all_coins_test_xts <- Return_test$Open_all_coins
+```
+
+## Models 
+
+For the following models we will use the RMSE function that we defined earlier to calculate the accuracy of our model. We can interpret the RMSE similarly to a standard deviation: it is the typical error we make when predicting the volatility. We will also analyze our models by graphing our results and determine the best fit algorithm subject to time. 
+
+We will first define the GARCH(1,1) model to predict our volatility of bitcoin  for the next 30 days, then we will refine our predictions by using linear regression and random forest.
+
+### GARCH(1,1)
+As previously defined GARCH(1,1) model is a a machine learning algorithm that helps us predict the future volatility. It assumes that $R_{t} = \mu + \epsilon_{t} $ for $t$ day where $ \epsilon_{t} $ is independent errors sampled from the same distribution centered at 0. We also assume that $ \epsilon_{t} \~ N(0,\sigma_{t}^2) $ meaning that returns are normally distributed. 
+The GARCH(1,1) variance $\sigma_{t}^2$ at day $t$  is calculated as followed:
+$$\sigma_{t}^2 =\omega + \alpha\epsilon_{t-1}+\beta\sigma_{t-1}^2$$
+$\omega$,$\alpha$  $\beta$ must all be positive ie: $> 0$, and $\alpha + \beta < 1 $ must be satisfied. This ensures that $\sigma_{t}^2>0$ at all times. 
+To find the conditional volatility per day, which is the square root of $\sigma_{t}^2$, we need to estimate four parameters $\mu$, $\omega$, $\alpha$ and $\beta$ by maximum likelihood.
+
+Although this model only allow us to calculate the variance at time $t$, we can repeat the process as many times as we we like as long as we use the previously calculated estimate. Since $\alpha + \beta < 1 $ , the garch variance $\sigma_{t}^2$ is mean reverting, meaning that it will return to it's long run variance equal to $\frac{\omega}{(1-\alpha-\beta)}$.
+
+Fortunately for us, the rugarch package written by Alexios Ghalanos allow us to simply apply the GARCH(1,1) model. Firstly, we need to define which GARCH model we will use.
+
+```{r , echo=TRUE}
+#let's define our GARCH model settings
+garchspec <- ugarchspec(mean.model=list(armaOrder=c(0,0)),
+                        variance.model = list(model="sGARCH",garchOrder=c(1,1)),
+                        distribution.model = "norm")
+garchspec
+```
+
+Now, we can estimate the GARCH(1,1) model to all of our cryptocurrencies.
+```{r , echo=TRUE}
+#Apply the GARCH model to our cryptocurrencies'daily returns
+garchfit_bitcoin_test <- ugarchfit(data=bitcoin_test_xts,spec=garchspec)
+garchfit_dogecoin_test <- ugarchfit(data=dogecoin_test_xts,spec=garchspec)
+garchfit_ethereum_test <- ugarchfit(data=ethereum_test_xts,spec=garchspec)
+garchfit_litecoin_test <- ugarchfit(data=litecoin_test_xts,spec=garchspec)
+garchfit_all_coins_test <- ugarchfit(data=all_coins_test_xts,spec=garchspec)
+```
+
+Our GARCH(1,1) model predicts our four parameters as follow:
+```{r , echo=FALSE}
+#garch coefficients for bitcoin test set
+garchcoef_bitcoin_test <- coef(garchfit_bitcoin_test)
+garchcoef_bitcoin_test 
+```
+
+Let's now retrieve conditional volatility from our calculated garch model:
+```{r , echo=TRUE}
+garchvol_bitcoin_test <- sigma(garchfit_bitcoin_test)
+garchvol_dogecoin_test <- sigma(garchfit_dogecoin_test)
+garchvol_ethereum_test <- sigma(garchfit_ethereum_test)
+garchvol_litecoin_test <- sigma(garchfit_litecoin_test)
+garchvol_all_coins_test <- sigma(garchfit_all_coins_test)
+volatility_test <- data.frame(Date=index(garchvol_bitcoin_test), vol_bitcoin=coredata(garchvol_bitcoin_test),
+                         vol_dogecoin= coredata(garchvol_dogecoin_test),
+                         vol_ethereum= coredata(garchvol_ethereum_test),
+                         vol_litecoin= coredata(garchvol_litecoin_test),
+                         vol_all_coins= coredata(garchvol_all_coins_test))
+```
+
+Our volatility for bitcoin for the testing period using using the GARCH(1,1) looks like this:
+```{r , echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") 
+```
+
+We can observe a moderate correlation between bitcoin's volatility and the other cryptocurrencies. We will later use other cryptocurrencies' volatility to help us better define our bitcoin's volatility.
+
+```{r , echo=FALSE, message = FALSE, warning = FALSE}
+#correaltion between different volatilities and select which one will help create the model
+vol_cor_results <- data_frame(method = c("VOL BTC-DGC",
+                                     "VOL BTC-ETH",
+                                     "VOL BTC-LTC",
+                                     "VOL BTC-ALL"),
+                          correlations = c(cor(volatility_test$vol_bitcoin,volatility_test$vol_dogecoin),
+                                           cor(volatility_test$vol_bitcoin,volatility_test$vol_ethereum),
+                                           cor(volatility_test$vol_bitcoin,volatility_test$vol_litecoin),
+                                           cor(volatility_test$vol_bitcoin,volatility_test$vol_all_coins)))
+vol_cor_results %>% knitr::kable()
+```
+
+Now let's predict the volatility for the next 30 days. The ugarchforecast() function allow us to predict the volatility for the next $ t $ days.
+```{r , echo=TRUE, message = FALSE, warning = FALSE}
+# forecast for the next 30 days based 
+garchforecast_bitcoin_test <- ugarchforecast(fitORspec = garchfit_bitcoin_test,n.ahead = 30 )
+garchforecast_dogecoin_test <- ugarchforecast(fitORspec = garchfit_dogecoin_test,n.ahead = 30 )
+garchforecast_ethereum_test <- ugarchforecast(fitORspec = garchfit_ethereum_test,n.ahead = 30 )
+garchforecast_litecoin_test <- ugarchforecast(fitORspec = garchfit_litecoin_test,n.ahead = 30 )
+garchforecast_all_coins_test <- ugarchforecast(fitORspec = garchfit_all_coins_test,n.ahead = 30 )
+
+#retrieving the volatility 
+forecast_bitcoin <- sigma(garchforecast_bitcoin_test)
+forecast_dogecoin <- sigma(garchforecast_dogecoin_test)
+forecast_ethereum <- sigma(garchforecast_ethereum_test)
+forecast_litecoin <- sigma(garchforecast_litecoin_test)
+forecast_all_coins <- sigma(garchforecast_all_coins_test)
+
+# change format from timeseries to dataframe
+volatility_bitcoin_forecast <- data.frame(index=index(forecast_bitcoin), coredata(forecast_bitcoin)) %>% mutate(vol_bitcoin=X2021.05.07) %>% select(index,vol_bitcoin)
+volatility_dogecoin_forecast <- data.frame(index=index(forecast_dogecoin), coredata(forecast_dogecoin)) %>% mutate(vol_dogecoin=X2021.05.07) %>% select(index,vol_dogecoin)
+volatility_ethereum_forecast <- data.frame(index=index(forecast_ethereum), coredata(forecast_ethereum)) %>% mutate(vol_ethereum=X2021.05.07) %>% select(index,vol_ethereum)
+volatility_litecoin_forecast <- data.frame(index=index(forecast_litecoin), coredata(forecast_litecoin)) %>% mutate(vol_litecoin=X2021.05.07) %>% select(index,vol_litecoin)
+volatility_all_coins_forecast <- data.frame(index=index(forecast_all_coins), coredata(forecast_all_coins)) %>% mutate(vol_all_coins=X2021.05.07) %>% select(index,vol_all_coins)
+
+#getting the correct dates and joining all the predicted volatilities together
+tail_dates <- validation_set %>% slice_tail(n=30) %>% select(Date)
+
+#store all predicted volatilities in a common dataframe
+volatility_30days_forcecast <- data.frame(Date=tail_dates$Date, vol_bitcoin=volatility_bitcoin_forecast$vol_bitcoin,
+                              vol_dogecoin= volatility_dogecoin_forecast$vol_dogecoin,
+                              vol_ethereum= volatility_ethereum_forecast$vol_ethereum,
+                              vol_litecoin= volatility_litecoin_forecast$vol_litecoin,
+                              vol_all_coins= volatility_all_coins_forecast$vol_all_coins)
+```
+
+Here is a plot of our predictions. All predictions seem to flatten in time, which is expected because our GARCH(1,1) model is mean reverting, as we have mentioned previously, their long run variance is equal to $\frac{\omega}{(1-\alpha-\beta)}$.
+```{r , echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+# graph
+volatility_30days_forcecast %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="Bitcoin")) + geom_line(aes(y=vol_dogecoin, color="Dogecoin")) + geom_line(aes(y=vol_ethereum, color="Ethereum")) + geom_line(aes(y=vol_litecoin, color="Litecoin")) + geom_line(aes(y=vol_all_coins, color="Crypto Average")) + labs(x = "Date", y = "Predicted Volatility / Standard deviation of daily returns", color = "Volatility of") + scale_color_manual(values = colors)
+```
+
+### Linear Regression
+
+
+```{r , echo=TRUE, message = FALSE, warning = FALSE}
+#fit the data 
+#linear regression
+fit <- volatility_test %>% 
+  lm(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = .)
+```
+
+### Bibiography
+
+Investopedia. 2021. Volatility. [online] Available at: <https://www.investopedia.com/terms/v/volatility.asp> [Accessed 23 June 2021].
+Investopedia. 2021. Return. [online] Available at: <https://www.investopedia.com/terms/r/return.asp> [Accessed 23 June 2021].
+Dr. Kris Boudt. Data Camp. 2021 Garch Models in R [online] Available at: https://campus.datacamp.com/courses/garch-models-in-r/ [Accessed 23 June 2021].
+Engle, R., 2021. 8. [online] Stern.nyu.edu. Available at: <https://www.stern.nyu.edu/rengle/GARCH101.PDF> [Accessed 30 June 2021].
+```{r , echo=FALSE}
+citation("rugarch")
+```
+
+
+More information on the volatility index:
+https://www.buybitcoinworldwide.com/volatility-index/
