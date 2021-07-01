@@ -100,7 +100,7 @@ colors <- c("Bitcoin" = "green", "Dogecoin" = "orange", "Ethereum" = "purple", "
 test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=(Open), color="Bitcoin")) + geom_line(aes(y=(Open_dgc), color="Dogecoin")) + geom_line(aes(y=(Open_eth), color="Ethereum")) + geom_line(aes(y=(Open_ltc), color="Litecoin")) + geom_line(aes(y=(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Open Prices", color = "Legend") + scale_color_manual(values = colors) + 
   geom_vline(xintercept=as.numeric(c(ymd("2017-12-30"),ymd("2021-05-01"))),size=1.5, colour="red", alpha=0.1)
 test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_dgc), color="Dogecoin")) + geom_line(aes(y=log(Open_eth), color="Ethereum")) + geom_line(aes(y=log(Open_ltc), color="Litecoin")) + geom_line(aes(y=log(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors)
-test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average Shifted Up")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
 
 #correlations
 cor_results <- data_frame(method = c("BTC-DGC",
@@ -168,7 +168,7 @@ volatility_test <- data.frame(Date=index(garchvol_bitcoin_test), vol_bitcoin=cor
                          vol_litecoin= coredata(garchvol_litecoin_test),
                          vol_all_coins= coredata(garchvol_all_coins_test))
 
-volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") 
+volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") + labs(x = "Date", y = "Volatility / Standard deviation of daily returns")
 
 #correaltion between different volatilities and select which one will help create the model
 vol_cor_results <- data_frame(method = c("VOL BTC-DGC",
@@ -223,8 +223,11 @@ volatility_30days_forcecast %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoi
 fit <- volatility_test %>% 
   lm(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = .)
 
+# coefficients
+fit$coefficients
+
 #random forest 
-fit_rf <- randomForest(vol_bitcoin ~ ., data = volatility_test)
+fit_rf <- randomForest(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = volatility_test)
 
 #predict using forecast data
 predict <- volatility_30days_forcecast %>%
@@ -233,7 +236,7 @@ predict <- volatility_30days_forcecast %>%
 predict_rf <- volatility_30days_forcecast %>%
   mutate(vol_bitcoin_hat = predict(fit_rf, newdata = .))
 
-#validation
+#applying the GARCH(1,1) model to the validation data
 garchfit_bitcoin <- ugarchfit(data=bitcoin_xts,spec=garchspec)
 garchfit_dogecoin <- ugarchfit(data=dogecoin_xts,spec=garchspec)
 garchfit_ethereum <- ugarchfit(data=ethereum_xts,spec=garchspec)
@@ -253,8 +256,12 @@ volatility <- data.frame(Date=index(garchvol_bitcoin), vol_bitcoin=coredata(garc
                          vol_ethereum= coredata(garchvol_ethereum),
                          vol_litecoin= coredata(garchvol_litecoin),
                          vol_all_coins= coredata(garchvol_all_coins))
+
+#retrieving the data for the last 30 days
 validation_volatility <- volatility %>% slice_tail(n=30)
-validation_volatility %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") + geom_line(aes(y=vol_dogecoin), color="red") + geom_line(aes(y=vol_ethereum), color="orange") + geom_line(aes(y=vol_litecoin), color="blue") + geom_line(aes(y=vol_all_coins), color="pink")
+
+#plot
+validation_volatility %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="Bitcoin")) + geom_line(aes(y=vol_dogecoin, color="Dogecoin")) + geom_line(aes(y=vol_ethereum, color="Ethereum")) + geom_line(aes(y=vol_litecoin, color="Litecoin")) + geom_line(aes(y=vol_all_coins, color="Crypto Average")) + labs(x = "Date", y = "True Volatility / Standard deviation of daily returns", color = "Volatility of") + scale_color_manual(values = colors)
 
 
 #true volatility against prediction
@@ -262,14 +269,19 @@ true_volatility_vs_prediction <- data.frame(Date=validation_volatility$Date, vol
                          vol_bitcoin_garch_prediction= volatility_30days_forcecast$vol_bitcoin,
                          vol_bitcoin_lm= predict$vol_bitcoin_hat,
                          vol_bitcoin_rf= predict_rf$vol_bitcoin_hat)
-head(true_volatility_vs_prediction)
 
-true_volatility_vs_prediction %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") + geom_line(aes(y=vol_bitcoin_garch_prediction), color="red") + geom_line(aes(y=vol_bitcoin_lm), color="purple") + geom_line(aes(y=vol_bitcoin_rf), color="pink")
+colors_predictions <- c("BTC VOL" = "green", "BTC pred-VOL GARCH" = "blue", "BTC pred-VOL LN" = "orange", "BTC pred-VOL RF"="red")
+
+true_volatility_vs_prediction %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="BTC VOL")) + geom_line(aes(y=vol_bitcoin_garch_prediction, color="BTC pred-VOL GARCH")) + geom_line(aes(y=vol_bitcoin_lm, color="BTC pred-VOL LN")) + geom_line(aes(y=vol_bitcoin_rf, color="BTC pred-VOL RF")) + labs(x = "Date", y = "Volatility / Standard deviation of daily returns", color = "Legend") + scale_color_manual(values = colors_predictions)
 
 RMSE <- function(true_ratings, predicted_ratings){
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
 
-RMSE(true_volatility_vs_prediction$vol_bitcoin*sqrt(252),true_volatility_vs_prediction$vol_bitcoin_garch_prediction*sqrt(252))
-RMSE(true_volatility_vs_prediction$vol_bitcoin*sqrt(252),true_volatility_vs_prediction$vol_bitcoin_lm*sqrt(252))
-RMSE(true_volatility_vs_prediction$vol_bitcoin*sqrt(252),true_volatility_vs_prediction$vol_bitcoin_rf*sqrt(252))
+rmse_results <- data_frame(method = c("GARCH(1,1) model",
+                                         "Linear Regression + GARCH(1,1) model ",
+                                         "Random Forest+ GARCH(1,1) model "),
+                              RMSE = c(RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_garch_prediction),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_lm),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_rf)))
+rmse_results %>% knitr::kable()

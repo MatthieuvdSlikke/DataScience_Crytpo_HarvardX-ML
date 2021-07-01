@@ -170,7 +170,7 @@ test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) 
 As expected, we can observe from the log transformations, that the three cryptocurrencies follow approximately the same trend as bitcoin. We can see that particularly with the average sum change in price of the three cryptocurrencies and bitcoin when we overlay the two timeseries below.
 
 ```{r, echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
-test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average Shifted Up")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
 ```
 
 We can also observe a strong correlation between bitcoins and all the other cryptocurrencies.
@@ -235,7 +235,7 @@ We will first define the GARCH(1,1) model to predict our volatility of bitcoin  
 As previously defined GARCH(1,1) model is a a machine learning algorithm that helps us predict the future volatility. It assumes that $R_{t} = \mu + \epsilon_{t} $ for $t$ day where $ \epsilon_{t} $ is independent errors sampled from the same distribution centered at 0. We also assume that $ \epsilon_{t} \~ N(0,\sigma_{t}^2) $ meaning that returns are normally distributed. 
 The GARCH(1,1) variance $\sigma_{t}^2$ at day $t$  is calculated as followed:
 $$\sigma_{t}^2 =\omega + \alpha\epsilon_{t-1}+\beta\sigma_{t-1}^2$$
-$\omega$,$\alpha$  $\beta$ must all be positive ie: $> 0$, and $\alpha + \beta < 1 $ must be satisfied. This ensures that $\sigma_{t}^2>0$ at all times. 
+$\omega$,$\alpha$  $\beta$ must all be positive ie: $ > 0$, and $ \alpha + \beta < 1 $ must be satisfied. This ensures that $\sigma_{t}^2>0$ at all times. 
 To find the conditional volatility per day, which is the square root of $\sigma_{t}^2$, we need to estimate four parameters $\mu$, $\omega$, $\alpha$ and $\beta$ by maximum likelihood.
 
 Although this model only allow us to calculate the variance at time $t$, we can repeat the process as many times as we we like as long as we use the previously calculated estimate. Since $\alpha + \beta < 1 $ , the garch variance $\sigma_{t}^2$ is mean reverting, meaning that it will return to it's long run variance equal to $\frac{\omega}{(1-\alpha-\beta)}$.
@@ -283,7 +283,7 @@ volatility_test <- data.frame(Date=index(garchvol_bitcoin_test), vol_bitcoin=cor
 
 Our volatility for bitcoin for the testing period using using the GARCH(1,1) looks like this:
 ```{r , echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
-volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") 
+volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") + labs(x = "Date", y = "Volatility / Standard deviation of daily returns")
 ```
 
 We can observe a moderate correlation between bitcoin's volatility and the other cryptocurrencies. We will later use other cryptocurrencies' volatility to help us better define our bitcoin's volatility.
@@ -343,6 +343,9 @@ volatility_30days_forcecast %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoi
 
 ### Linear Regression
 
+Since have seen a moderate correlation between the volatility of bitcoin and the other cryptocurrencies' volatility, we can perform a linear regression to our model. Our formula to estimate the volatility of bitcoin becomes:
+$$\sigma_{t} =\sqrt{\omega + \alpha\epsilon_{t-1}+\beta\sigma_{t-1}^2} + \beta_{0} + \beta_{1}\sigma_{l,t} + \beta_{2}\sigma_{a,t} + \beta_{3}\sigma_{e,t} + \beta_{4}\sigma_{d,t}  $$
+where $\sigma_{l,t}^2$ is the volatility of litecoin at day $t$, $\sigma_{a,t}^2$ is the volatility of the average price all the cryptocurrencies at day $t$, $\sigma_{e,t}^2$ is the volatility of ethereum at day $t$ and $\sigma_{d,t}^2$ is the volatility of dogecoin at day $t$.
 
 ```{r , echo=TRUE, message = FALSE, warning = FALSE}
 #fit the data 
@@ -351,7 +354,104 @@ fit <- volatility_test %>%
   lm(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = .)
 ```
 
-### Bibiography
+We find the following coefficients for our model:
+```{r , echo=FALSE, message = FALSE, warning = FALSE}
+# coefficients
+fit$coefficients
+```
+
+```{r , echo=TRUE, message = FALSE, warning = FALSE}
+#predict using forecast data
+predict <- volatility_30days_forcecast %>%
+  mutate(vol_bitcoin_hat = predict(fit, newdata = .))
+```
+
+### Random Forest
+
+For our final prediction model, we will use random forest to estimate Bitcoin's volatility using regression. 
+
+```{r , echo=TRUE, message = FALSE, warning = FALSE}
+#random forest 
+fit_rf <- randomForest(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = volatility_test)
+
+#predict using forecast data
+predict_rf <- volatility_30days_forcecast %>%
+  mutate(vol_bitcoin_hat = predict(fit_rf, newdata = .))
+```
+
+# Results
+
+Let's now analyze which algorithm predicts best our Bitcoin volatility for the last 30 days.
+Firstly, we will calculate the true volatility for that period. 
+
+```{r , echo=TRUE, message = FALSE, warning = FALSE}
+#applying the GARCH(1,1) model to the validation data
+garchfit_bitcoin <- ugarchfit(data=bitcoin_xts,spec=garchspec)
+garchfit_dogecoin <- ugarchfit(data=dogecoin_xts,spec=garchspec)
+garchfit_ethereum <- ugarchfit(data=ethereum_xts,spec=garchspec)
+garchfit_litecoin <- ugarchfit(data=litecoin_xts,spec=garchspec)
+garchfit_all_coins <- ugarchfit(data=all_coins_xts,spec=garchspec)
+
+#data volatility validation
+garchvol_bitcoin <- sigma(garchfit_bitcoin)
+garchvol_dogecoin <- sigma(garchfit_dogecoin)
+garchvol_ethereum <- sigma(garchfit_ethereum)
+garchvol_litecoin <- sigma(garchfit_litecoin)
+garchvol_all_coins <- sigma(garchfit_all_coins)
+
+#volatility in one table validation
+volatility <- data.frame(Date=index(garchvol_bitcoin), vol_bitcoin=coredata(garchvol_bitcoin),
+                         vol_dogecoin= coredata(garchvol_dogecoin),
+                         vol_ethereum= coredata(garchvol_ethereum),
+                         vol_litecoin= coredata(garchvol_litecoin),
+                         vol_all_coins= coredata(garchvol_all_coins))
+
+#retrieving the data for the last 30 days
+validation_volatility <- volatility %>% slice_tail(n=30)
+```
+
+Here is a plot of the true volatilities. We can observe that the true volatilities are much less linear than our original forecast predictions:
+
+```{r , echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+#plot
+validation_volatility %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="Bitcoin")) + geom_line(aes(y=vol_dogecoin, color="Dogecoin")) + geom_line(aes(y=vol_ethereum, color="Ethereum")) + geom_line(aes(y=vol_litecoin, color="Litecoin")) + geom_line(aes(y=vol_all_coins, color="Crypto Average")) + labs(x = "Date", y = "True Volatility / Standard deviation of daily returns", color = "Volatility of") + scale_color_manual(values = colors)
+```
+
+
+Now let's plot Bitcoin true volatilities against our predicted volatilities:
+
+
+```{r , echo=FALSE, message = FALSE, warning = FALSE, fig.height=4, fig.width=5}
+#true volatility against prediction
+true_volatility_vs_prediction <- data.frame(Date=validation_volatility$Date, vol_bitcoin=validation_volatility$vol_bitcoin,
+                         vol_bitcoin_garch_prediction= volatility_30days_forcecast$vol_bitcoin,
+                         vol_bitcoin_lm= predict$vol_bitcoin_hat,
+                         vol_bitcoin_rf= predict_rf$vol_bitcoin_hat)
+
+colors_predictions <- c("BTC VOL" = "green", "BTC pred-VOL GARCH" = "blue", "BTC pred-VOL LN" = "orange", "BTC pred-VOL RF"="red")
+
+true_volatility_vs_prediction %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="BTC VOL")) + geom_line(aes(y=vol_bitcoin_garch_prediction, color="BTC pred-VOL GARCH")) + geom_line(aes(y=vol_bitcoin_lm, color="BTC pred-VOL LN")) + geom_line(aes(y=vol_bitcoin_rf, color="BTC pred-VOL RF")) + labs(x = "Date", y = "Volatility / Standard deviation of daily returns", color = "Legend") + scale_color_manual(values = colors_predictions)
+```
+
+From the graph above, we can observe that overall, the GARCH(1,1) predicted well for the last 30 days. However, the linear regression model was able to better predict the volatility trend within the first 5 days. The random forest model is here the worst performing model, even though it tends to follow the same trend as the linear regression model. 
+
+These observations are reflected in the following RMSE table:
+
+```{r , echo=FALSE, message = FALSE, warning = FALSE}
+rmse_results <- data_frame(method = c("GARCH(1,1) model",
+                                         "Linear Regression + GARCH(1,1) model ",
+                                         "Random Forest + GARCH(1,1) model "),
+                              RMSE = c(RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_garch_prediction),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_lm),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_rf)))
+rmse_results %>% knitr::kable()
+```
+
+# Conclusion
+
+In conclusion, the GARCH(1,1) model is the most accurate model to evaluate the long term volatility of Bitcoin up to 30 days for this analysis. However, it can helpful to perform linear regression by using other cryptocurrencies' data as features, to evaluate the short term trend in the first 5 days.
+
+# Bibiography
 
 Investopedia. 2021. Volatility. [online] Available at: <https://www.investopedia.com/terms/v/volatility.asp> [Accessed 23 June 2021].
 Investopedia. 2021. Return. [online] Available at: <https://www.investopedia.com/terms/r/return.asp> [Accessed 23 June 2021].
@@ -362,5 +462,5 @@ citation("rugarch")
 ```
 
 
-More information on the volatility index:
+More information on Bitcoin volatility:
 https://www.buybitcoinworldwide.com/volatility-index/
