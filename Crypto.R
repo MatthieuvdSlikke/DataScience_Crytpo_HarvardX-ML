@@ -6,362 +6,282 @@
 
 if(!require(tidyverse)) install.packages("tidyverse", repos =
                                            "http://cran.us.r-project.org")
-if(!require(tidyverse)) install.packages("dplyr", repos =
+if(!require(dplyr)) install.packages("dplyr", repos =
                                            "http://cran.us.r-project.org")
 if(!require(caret)) install.packages("caret",repos = 
                                        "http://cran.r-project.org")
-if(!require(data.table)) install.packages("data.table", repos =
-                                            "http://cran.us.r-project.org")
-if(!require(lubridate)) install.packages("lubridate", repos =
-                                           "http://cran.us.r-project.org")
-if(!require(gridExtra)) install.packages("gridExtra", repos =
-                                           "http://cran.us.r-project.org")
-if(!require(tidytext)) install.packages("tidytext", repos =
-                                           "http://cran.us.r-project.org")
-if(!require(textdata)) install.packages("textdata", repos =
-                                           "http://cran.us.r-project.org")
-if(!require(rtweet)) install.packages("rtweet", repos =
-                                          "http://cran.us.r-project.org")
 if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics", repos =
                                                       "http://cran.us.r-project.org")
 if(!require(xts)) install.packages("xts", repos =
                                      "http://cran.us.r-project.org")
-if(!require(quantmod)) install.packages("quantmod", repos =
-                                          "http://cran.us.r-project.org")
+if(!require(rugarch)) install.packages("rugarch", repos = 
+                                         "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = 
+                                              "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
 
 
 library(tidyverse)
 library(dplyr)
 library(caret)
-library(data.table)
-library(lubridate)
-library(gridExtra)
-library(textdata)
-library(tidytext) 
-library(textdata)
-library(rtweet)
 library(PerformanceAnalytics)
 library(xts)
-library(quantmod)
+library(rugarch)
+library(randomForest)
+library(lubridate)
 
+citation("rugarch")
 
-# elon musks tweets dataset:
-# https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/TweetsElonMusk.csv
+#downloading the cryptos data
 
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/TweetsElonMusk.csv", dl, method = "curl")
-tweets <- read.csv(file = dl, header = TRUE,stringsAsFactors = FALSE)
-tweets <- tweets %>% select(date, username, tweet, replies_count, likes_count, retweets_count, link) %>% mutate(tweet=as.character(tweet))
-
-#calculating sentiment of tweets
-tweet_sentiment <- tweets %>%
-  unnest_tokens(word, tweet, token = "tweets") %>%
-  inner_join(get_sentiments("afinn"))
-sent <- tweet_sentiment %>% group_by(link) %>% summarise(Avg_Score = mean(value))
-view(sent)
-
-#join sentiment score and tweets
-all_together <- full_join(tweets, sent, by="link")
-#make other score 0 if no sentiment 
-all_together[is.na(all_together)] <-  0
-view(all_together)
-
-all_together <- all_together %>% mutate(date=as.Date(date)) %>% filter(date >= '2015-01-01')
-all_together %>% ggplot(aes(x=date)) + geom_point(aes(y = Avg_Score))
-
-min(all_together$date)
-
-#there is more lines using the afinn library then using the bing library, so we are going to use the afinn library.
-
+#bitcoin
 dl <- tempfile()
 download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/BTC-USD.csv", dl, method = "curl")
 bitcoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+bitcoin <- bitcoin %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open= as.numeric(Open), Volume=as.numeric(Volume)) %>% 
+  select(Date,Open,Volume)
 
-bitcoin <- bitcoin %>% mutate(Date=as.Date(Date)) %>% filter(Date >= '2015-01-01') %>% filter(Date <= '2021-04-17') %>% mutate(Open= as.numeric(Open))
-bitcoin <- bitcoin %>% mutate(date=Date) 
-btc_tweet <- full_join(bitcoin, all_together, by="date")
-btc_tweet <- btc_tweet %>% select(date,Open,Avg_Score,replies_count,likes_count,retweets_count)
-btc_tweet <- btc_tweet %>% filter(Open!='null')
-view(btc_tweet)
-
-
-redone <- btc_tweet %>% mutate(Open= as.numeric(Open)) 
-nodate <- redone  %>% select(-date) %>% mutate(replies_count=as.numeric(replies_count),
-                            likes_count=as.numeric(likes_count),
-                            retweets_count=as.numeric(retweets_count))
-nodate[is.na(nodate)] <-  0
-view(nodate)
-
-cor(x=nodate$Open,y=nodate$Avg_Score)
-
-view(redone)
-
-btc_tweet %>%  mutate(Open=as.numeric(Open)) %>% ggplot(aes(x=date, y = Open)) + geom_line()
-redone %>% ggplot(aes(x=date, y = Open)) + geom_line()
-
-btc_to_xts<- bitcoin  %>% select(Date,Open)
-btc_to_xts<- as.xts(btc_to_xts[, -1], order.by = btc_to_xts$Date, dateFormat="POSIXct")
-view(btc_to_xts)
-
-
-#calculating returns
-Returns <- CalculateReturns(btc_to_xts)
-Returns[is.na(Returns)] <-  0
-sd(Returns)*sqrt(252)
-view(Returns)
-plot(Returns)
-ret_try <- data.frame(date=index(Returns), returns=coredata(Returns))
-ret_try <- ret_try %>% mutate(direction= ifelse(returns>=0,1,-1))
-ret_try[is.na(ret_try)] <-  0
-view(ret_try)
-
-
-avg_score_day <- redone  %>% select(date, Avg_Score)
-avg_score_day <- avg_score_day %>% group_by(date) %>% summarise(Avg_Score = mean(Avg_Score))
-avg_score_day[is.na(avg_score_day)] <-  0
-
-total <- full_join(ret_try , avg_score_day, by="date")
-total <- total %>% mutate(returns= as.numeric(returns), Avg_Score=as.numeric(Avg_Score),direction=as.numeric(direction))
-total[is.na(total)] <-0
-total <- total %>% mutate(sent=ifelse(Avg_Score==0,0,ifelse(Avg_Score>0,1,-1)))
-cor(x=total$returns,y=total$Avg_Score)
-cor(x=total$direction,y=total$Avg_Score)
-cor(x=total$direction,y=total$sent)
- 
-
-#adding weights
-
-tweet_sentiment_new <- tweets %>%
-  unnest_tokens(word, tweet, token = "tweets") %>% 
-  filter(str_to_lower(word) %in% c("bitcoin", "bitcoins","btc",
-                                   "dogecoin","coin","coins", 
-                                   "dogecoins","crypto" ,"cryptocurrency",
-                                   "market", "blockchain","ethereum","eth", "nft",
-                                   "stocks", "doge", "finance", "currency", 
-                                   "mining","invest","invests","investor", "token") ) 
-tweet_sentiment_new  <- tweet_sentiment_new %>% mutate(weight=1)
-new_al <- inner_join(tweets, tweet_sentiment_new, by="link") %>% select(link,weight) %>% group_by(link) %>% summarise(sum_weight=2)
-view(new_al)
-
-new_together <- inner_join(all_together,new_al,by="link")
-new_together <- new_together %>% filter(!is.na(date))
-new_together <- new_together %>% mutate(sum_weight=ifelse(is.na(sum_weight),1,2))
-view(new_together)
-
-new_togethero <- new_together %>% group_by(date) %>% summarise(sum_weight=2)
-view(new_togethero)
-
-totali <- full_join(total,new_togethero, by="date")
-totali[is.na(totali)] <- 1
-totali <- totali %>% mutate(avg= sum_weight*sent)
-view(totali)
-cor(x=totali$direction,y=totali$avg)
-
-#too weak of correlation
-
-#getting other finance datat
+#dogecoin
 dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/AAPL.csv", dl, method = "curl")
-apple <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-apple <- apple %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_appl= as.numeric(Open)) %>% select(date,Open_appl)
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/DOGE-USD.csv", dl, method = "curl")
+doge <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+doge <- doge %>% 
+  mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_dgc= as.numeric(Open), Volume_dgc=as.numeric(Volume)) %>% 
+  select(Date,Open_dgc,Volume_dgc)
 
+#ethereum
 dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/FB.csv", dl, method = "curl")
-facebook <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-facebook <- facebook %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_fb= as.numeric(Open)) %>% select(date,Open_fb)
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/ETH-USD.csv", dl, method = "curl")
+ethereum <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+ethereum  <- ethereum %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>% 
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_eth= as.numeric(Open), Volume_eth=as.numeric(Volume)) %>% 
+  select(Date,Open_eth,Volume_eth)
 
+#litecoin
 dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/GC%3DF.csv", dl, method = "curl")
-gold <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-gold <- gold %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_gld= as.numeric(Open)) %>% select(date,Open_gld)
-  
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/GOOGL.csv", dl, method = "curl")
-google <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-google <- google %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_ggl= as.numeric(Open)) %>% select(date,Open_ggl)
-  
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/TSLA.csv", dl, method = "curl")
-tesla <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-tesla <- tesla %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_tsla= as.numeric(Open)) %>% select(date,Open_tsla)
+download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/LTC-USD.csv", dl, method = "curl")
+litecoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
+litecoin <- litecoin %>% mutate(Date=as.Date(Date)) %>% 
+  filter(Date >= '2015-01-01') %>%
+  filter(Open!=is.na(Open),Volume!=is.na(Volume)) %>%
+  filter(Open!='null',Volume!='null') %>% 
+  mutate(Open_ltc= as.numeric(Open), Volume_ltc=as.numeric(Volume)) %>% 
+  select(Date,Open_ltc,Volume_ltc)
 
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/AMZN.csv", dl, method = "curl")
-amazon <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-amazon <- amazon %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% mutate(Open_amz= as.numeric(Open)) %>% select(date,Open_amz)
+#table together and data exploration
+crypto <- inner_join(doge, ethereum, by='Date') %>% inner_join(.,litecoin, by='Date')%>% inner_join(.,bitcoin, by='Date')
 
-view(tesla)
+#selecting all open prices of coins and take the average price of all the other coins than bitcoin
+validation_set <- crypto %>% select(Date,Open,Open_dgc,Open_eth,Open_ltc) %>% mutate(Open_all_coins =(Open_dgc+Open_eth+Open_ltc)/3)
 
-all_prices <- left_join(apple, facebook, by='date') %>% left_join(., gold, by='date') %>% left_join(., google, by='date') %>% left_join(., tesla, by='date') %>% left_join(., amazon, by='date')
-view(all_prices)
+#test set 
+test_set <- validation_set %>% slice_head(n=nrow(validation_set)-30)
 
-#we will do a right join and not left join because we want to remove the weekends 
-all_prices_total <- right_join(total, all_prices, by='date') 
-view(all_prices_total)
-cor(x=all_prices_total$returns,y=all_prices_total$Open_appl)
-cor(x=all_prices_total$returns,y=all_prices_total$Open_fb)
-cor(x=all_prices_total$returns,y=all_prices_total$Open_gld)
-cor(x=all_prices_total$returns,y=all_prices_total$Open_tsla)
-cor(x=all_prices_total$returns,y=all_prices_total$Open_amz)
+#head test set
+head(test_set)
 
-#calculate returns for all
-all_pricesc_to_xts<- as.xts(all_prices[, -1], order.by = all_prices$date, dateFormat="POSIXct")
-view(all_pricesc_to_xts)
-Returns_all <- CalculateReturns(all_pricesc_to_xts)
-Returns_all[is.na(Returns_all)] <-  0
-#to remove first row Returns_all <- Returns_all[(-1),] 
-view(Returns_all)
+#dimension
+dim(test_set)
 
+#plots
+colors <- c("Bitcoin" = "green", "Dogecoin" = "orange", "Ethereum" = "purple", "Litecoin"="blue", "Crypto Average"="pink")
 
-#volatility way bigger for bitcoin annualized
-sd(Returns)*sqrt(252)
-sd(Returns_all)*sqrt(252)
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=(Open), color="Bitcoin")) + geom_line(aes(y=(Open_dgc), color="Dogecoin")) + geom_line(aes(y=(Open_eth), color="Ethereum")) + geom_line(aes(y=(Open_ltc), color="Litecoin")) + geom_line(aes(y=(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Open Prices", color = "Legend") + scale_color_manual(values = colors) + 
+  geom_vline(xintercept=as.numeric(c(ymd("2017-12-30"),ymd("2021-05-01"))),size=1.5, colour="red", alpha=0.1)
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_dgc), color="Dogecoin")) + geom_line(aes(y=log(Open_eth), color="Ethereum")) + geom_line(aes(y=log(Open_ltc), color="Litecoin")) + geom_line(aes(y=log(Open_all_coins), color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors)
+test_set %>% ggplot(aes(x=Date)) + geom_line(aes(y=log(Open), color="Bitcoin")) + geom_line(aes(y=log(Open_all_coins) + 4.5, color="Crypto Average")) + labs(x = "Year", y = "Log Open Prices", color = "Legend") + scale_color_manual(values = colors) + guides( y = "none")
 
-#plot returns
-plot.xts(Returns)
+#correlations
+cor_results <- data_frame(method = c("BTC-DGC",
+                                      "BTC-LTC",
+                                      "BTC-ALL",
+                                      "BTC-ETH"),
+                           correlations = c(cor(test_set$Open, test_set$Open_dgc),
+                                            cor(test_set$Open, test_set$Open_ltc),
+                                            cor(test_set$Open, test_set$Open_all_coins),
+                                            cor(test_set$Open,test_set$Open_eth)))
+cor_results %>% knitr::kable()
 
-#chart check the volatility per month
-chart.RollingPerformance(R=Returns,
-                         width=30,
-                         FUN="sd.annualized",
-                         scale=252,
-                         main="Rolling 1 month volatility")
+#transform into a time series
+validation_xts <- as.xts(validation_set[, -1], order.by = validation_set$Date, dateFormat="POSIXct")
+test_set_xts <- as.xts(test_set[, -1], order.by = test_set$Date, dateFormat="POSIXct")
 
+#calculate all the returns
+Returns_validation <- CalculateReturns(validation_xts)
+Return_test <- CalculateReturns(test_set_xts)
 
-#set parameter values
-alpha <- 0.1
-beta <- 0.8
-omega <- var(Returns)*(1-alpha-beta)
+#remove the first line as the first entry does not exist.
+Returns_validation <- Returns_validation[-1,]
+Return_test <- Return_test[-1,]
+head(Return_test)
 
-#set series of prediction error
-e <- Returns- mean(Returns)
-e2 <- e^2
+#seperate data 
+bitcoin_xts <- Returns_validation$Open
+dogecoin_xts <- Returns_validation$Open_dgc
+ethereum_xts <- Returns_validation$Open_eth
+litecoin_xts <- Returns_validation$Open_ltc
+all_coins_xts <- Returns_validation$Open_all_coins
 
-#we predict for each observation its variance
-nobs <- length(Returns)
-predvar <- rep(NA, nobs)
+bitcoin_test_xts <- Return_test$Open
+dogecoin_test_xts <- Return_test$Open_dgc
+ethereum_test_xts <- Return_test$Open_eth
+litecoin_test_xts <- Return_test$Open_ltc
+all_coins_test_xts <- Return_test$Open_all_coins
 
-#initialize the process at the sample variance
-predvar[1] <- var(Returns)
+#let's define our GARCH model settings
+garchspec <- ugarchspec(mean.model=list(armaOrder=c(0,0)),
+                        variance.model = list(model="sGARCH",garchOrder=c(1,1)),
+                        distribution.model = "norm")
+garchspec
 
-#loop starting at 2 because of the lagged predictor
-for(t in 2:nobs){
-  predvar[t] <- omega + alpha * e2[t-1] + beta*predvar[t-1]
-}
+#apply the garch model our data
+garchfit_bitcoin_test <- ugarchfit(data=bitcoin_test_xts,spec=garchspec)
+garchfit_dogecoin_test <- ugarchfit(data=dogecoin_test_xts,spec=garchspec)
+garchfit_ethereum_test <- ugarchfit(data=ethereum_test_xts,spec=garchspec)
+garchfit_litecoin_test <- ugarchfit(data=litecoin_test_xts,spec=garchspec)
+garchfit_all_coins_test <- ugarchfit(data=all_coins_test_xts,spec=garchspec)
 
-#volatility is sqrt of predicted variance
-predvol <- sqrt(predvar)
-predvol <- xts(predvol, order.by=time(Returns))
-view(predvol)
+#garch coefficients for bitcoin test set
+garchcoef_bitcoin_test <- coef(garchfit_bitcoin_test)
+garchcoef_bitcoin_test 
 
-#we compare with the unconditional volatility
-uncvol <- sqrt(omega/(1-alpha-beta))
-uncvol <- xts(rep(uncvol,nobs), order.by=time(Returns))
-view(uncvol)
+#retrieve volatility
+garchvol_bitcoin_test <- sigma(garchfit_bitcoin_test)
+garchvol_dogecoin_test <- sigma(garchfit_dogecoin_test)
+garchvol_ethereum_test <- sigma(garchfit_ethereum_test)
+garchvol_litecoin_test <- sigma(garchfit_litecoin_test)
+garchvol_all_coins_test <- sigma(garchfit_all_coins_test)
+volatility_test <- data.frame(Date=index(garchvol_bitcoin_test), vol_bitcoin=coredata(garchvol_bitcoin_test),
+                         vol_dogecoin= coredata(garchvol_dogecoin_test),
+                         vol_ethereum= coredata(garchvol_ethereum_test),
+                         vol_litecoin= coredata(garchvol_litecoin_test),
+                         vol_all_coins= coredata(garchvol_all_coins_test))
+
+volatility_test %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin), color="green") + labs(x = "Date", y = "Volatility / Standard deviation of daily returns")
+
+#correaltion between different volatilities and select which one will help create the model
+vol_cor_results <- data_frame(method = c("VOL BTC-DGC",
+                                         "VOL BTC-ETH",
+                                         "VOL BTC-LTC",
+                                         "VOL BTC-ALL"),
+                              correlations = c(cor(volatility_test$vol_bitcoin,volatility_test$vol_dogecoin),
+                                               cor(volatility_test$vol_bitcoin,volatility_test$vol_ethereum),
+                                               cor(volatility_test$vol_bitcoin,volatility_test$vol_litecoin),
+                                               cor(volatility_test$vol_bitcoin,volatility_test$vol_all_coins)))
+vol_cor_results %>% knitr::kable()
+
+#garch coefficients
+garchcoef_bitcoin_test <- coef(garchfit_bitcoin_test)
+garchcoef_bitcoin_test 
+
+# forecast for the next 30 days based 
+garchforecast_bitcoin_test <- ugarchforecast(fitORspec = garchfit_bitcoin_test,n.ahead = 30 )
+garchforecast_dogecoin_test <- ugarchforecast(fitORspec = garchfit_dogecoin_test,n.ahead = 30 )
+garchforecast_ethereum_test <- ugarchforecast(fitORspec = garchfit_ethereum_test,n.ahead = 30 )
+garchforecast_litecoin_test <- ugarchforecast(fitORspec = garchfit_litecoin_test,n.ahead = 30 )
+garchforecast_all_coins_test <- ugarchforecast(fitORspec = garchfit_all_coins_test,n.ahead = 30 )
+
+#retrieving the volatility 
+forecast_bitcoin <- sigma(garchforecast_bitcoin_test)
+forecast_dogecoin <- sigma(garchforecast_dogecoin_test)
+forecast_ethereum <- sigma(garchforecast_ethereum_test)
+forecast_litecoin <- sigma(garchforecast_litecoin_test)
+forecast_all_coins <- sigma(garchforecast_all_coins_test)
+
+# change format from timeseries to dataframe
+volatility_bitcoin_forecast <- data.frame(index=index(forecast_bitcoin), coredata(forecast_bitcoin)) %>% mutate(vol_bitcoin=X2021.05.07) %>% select(index,vol_bitcoin)
+volatility_dogecoin_forecast <- data.frame(index=index(forecast_dogecoin), coredata(forecast_dogecoin)) %>% mutate(vol_dogecoin=X2021.05.07) %>% select(index,vol_dogecoin)
+volatility_ethereum_forecast <- data.frame(index=index(forecast_ethereum), coredata(forecast_ethereum)) %>% mutate(vol_ethereum=X2021.05.07) %>% select(index,vol_ethereum)
+volatility_litecoin_forecast <- data.frame(index=index(forecast_litecoin), coredata(forecast_litecoin)) %>% mutate(vol_litecoin=X2021.05.07) %>% select(index,vol_litecoin)
+volatility_all_coins_forecast <- data.frame(index=index(forecast_all_coins), coredata(forecast_all_coins)) %>% mutate(vol_all_coins=X2021.05.07) %>% select(index,vol_all_coins)
+
+#getting the correct dates and joining all the predicted volatilities together
+tail_dates <- validation_set %>% slice_tail(n=30) %>% select(Date)
+
+#store all predicted volatilities in a common dataframe
+volatility_30days_forcecast <- data.frame(Date=tail_dates$Date, vol_bitcoin=volatility_bitcoin_forecast$vol_bitcoin,
+                              vol_dogecoin= volatility_dogecoin_forecast$vol_dogecoin,
+                              vol_ethereum= volatility_ethereum_forecast$vol_ethereum,
+                              vol_litecoin= volatility_litecoin_forecast$vol_litecoin,
+                              vol_all_coins= volatility_all_coins_forecast$vol_all_coins)
+# graph
+volatility_30days_forcecast %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="Bitcoin")) + geom_line(aes(y=vol_dogecoin, color="Dogecoin")) + geom_line(aes(y=vol_ethereum, color="Ethereum")) + geom_line(aes(y=vol_litecoin, color="Litecoin")) + geom_line(aes(y=vol_all_coins, color="Crypto Average")) + labs(x = "Date", y = "Predicted Volatility / Standard deviation of daily returns", color = "Volatility of") + scale_color_manual(values = colors)
+
+#fit the data 
+#linear regression
+fit <- volatility_test %>% 
+  lm(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = .)
+
+# coefficients
+fit$coefficients
+
+#random forest 
+fit_rf <- randomForest(vol_bitcoin ~ vol_litecoin + vol_all_coins + vol_ethereum + vol_dogecoin, data = volatility_test)
+
+#predict using forecast data
+predict <- volatility_30days_forcecast %>%
+  mutate(vol_bitcoin_hat = predict(fit, newdata = .))
+
+predict_rf <- volatility_30days_forcecast %>%
+  mutate(vol_bitcoin_hat = predict(fit_rf, newdata = .))
+
+#applying the GARCH(1,1) model to the validation data
+garchfit_bitcoin <- ugarchfit(data=bitcoin_xts,spec=garchspec)
+garchfit_dogecoin <- ugarchfit(data=dogecoin_xts,spec=garchspec)
+garchfit_ethereum <- ugarchfit(data=ethereum_xts,spec=garchspec)
+garchfit_litecoin <- ugarchfit(data=litecoin_xts,spec=garchspec)
+garchfit_all_coins <- ugarchfit(data=all_coins_xts,spec=garchspec)
+
+#data volatility validation
+garchvol_bitcoin <- sigma(garchfit_bitcoin)
+garchvol_dogecoin <- sigma(garchfit_dogecoin)
+garchvol_ethereum <- sigma(garchfit_ethereum)
+garchvol_litecoin <- sigma(garchfit_litecoin)
+garchvol_all_coins <- sigma(garchfit_all_coins)
+
+#volatility in one table validation
+volatility <- data.frame(Date=index(garchvol_bitcoin), vol_bitcoin=coredata(garchvol_bitcoin),
+                         vol_dogecoin= coredata(garchvol_dogecoin),
+                         vol_ethereum= coredata(garchvol_ethereum),
+                         vol_litecoin= coredata(garchvol_litecoin),
+                         vol_all_coins= coredata(garchvol_all_coins))
+
+#retrieving the data for the last 30 days
+validation_volatility <- volatility %>% slice_tail(n=30)
 
 #plot
-plot.xts(predvol)
-lines(uncvol, col="red", lwd=2) #below or above average volatility
+validation_volatility %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="Bitcoin")) + geom_line(aes(y=vol_dogecoin, color="Dogecoin")) + geom_line(aes(y=vol_ethereum, color="Ethereum")) + geom_line(aes(y=vol_litecoin, color="Litecoin")) + geom_line(aes(y=vol_all_coins, color="Crypto Average")) + labs(x = "Date", y = "True Volatility / Standard deviation of daily returns", color = "Volatility of") + scale_color_manual(values = colors)
 
 
-# rolling vol
-# https://stackoverflow.com/questions/12823445/faster-way-of-calculating-rolling-realized-volatility-in-r
-realized_vol <- xts(apply(Returns,2,runSD,n=30), index(Returns))*sqrt(252)
-view(realized_vol)
-realizedvol <- rollapply(Returns, width = 30, FUN=sd.annualized)
-view(realizedvol)
+#true volatility against prediction
+true_volatility_vs_prediction <- data.frame(Date=validation_volatility$Date, vol_bitcoin=validation_volatility$vol_bitcoin,
+                         vol_bitcoin_garch_prediction= volatility_30days_forcecast$vol_bitcoin,
+                         vol_bitcoin_lm= predict$vol_bitcoin_hat,
+                         vol_bitcoin_rf= predict_rf$vol_bitcoin_hat)
 
+colors_predictions <- c("BTC VOL" = "green", "BTC pred-VOL GARCH" = "blue", "BTC pred-VOL LN" = "orange", "BTC pred-VOL RF"="red")
+
+true_volatility_vs_prediction %>% ggplot(aes(x=Date)) + geom_line(aes(y=vol_bitcoin, color="BTC VOL")) + geom_line(aes(y=vol_bitcoin_garch_prediction, color="BTC pred-VOL GARCH")) + geom_line(aes(y=vol_bitcoin_lm, color="BTC pred-VOL LN")) + geom_line(aes(y=vol_bitcoin_rf, color="BTC pred-VOL RF")) + labs(x = "Date", y = "Volatility / Standard deviation of daily returns", color = "Legend") + scale_color_manual(values = colors_predictions)
 
 RMSE <- function(true_ratings, predicted_ratings){
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
 
-
-plot.xts(realized_vol)
-plot.xts(realizedvol)
-
-
-ret <- data.frame(date=index(Returns_all), coredata(Returns_all)) %>% mutate(date=as.Date(date))
-view(ret)
-all_prices_total_ret <- right_join(total, ret, by='date') 
-all_prices_total_ret <- all_prices_total_ret %>% mutate(dir_appl= ifelse(Open_appl>=0,1,-1),
-                                                        dir_fb= ifelse(Open_fb>=0,1,-1),
-                                                        dir_gld= ifelse(Open_gld>=0,1,-1),
-                                                        dir_tsla= ifelse(Open_tsla>=0,1,-1),
-                                                        dir_amz= ifelse(Open_amz>=0,1,-1))
-
-view(all_prices_total_ret)
-#cor not strong enough between 
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$Open_appl)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$Open_fb)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$Open_gld)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$Open_tsla)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$Open_amz)
-
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$dir_appl)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$dir_fb)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$dir_gld)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$dir_tsla)
-cor(x=all_prices_total_ret$returns,y=all_prices_total_ret$dir_amz)
-
-#however tech returns are moderately correlated
-cor(x=all_prices_total_ret$Open_fb,y=all_prices_total_ret$Open_appl)
-cor(x=all_prices_total_ret$Open_appl,y=all_prices_total_ret$Open_tsla)
-cor(x=all_prices_total_ret$Open_gld,y=all_prices_total_ret$Open_amz)
-cor(x=all_prices_total_ret$Open_appl,y=all_prices_total_ret$Open_amz)
-
-#let's check with price 
-all_prices_only_total <- bitcoin %>% select(date,Open) 
-all_prices_only_total <- right_join(all_prices_only_total, all_prices, by='date') %>% mutate(Open=as.numeric(Open))
-view(all_prices_only_total)
-
-log(all_prices_total$Open)
-typeof(all_prices_only_total$Open)
-
-all_prices_only_total %>% ggplot(aes(x=date)) + geom_line(aes(y=log(Open)), colour="red") + geom_line(aes(y=(log(Open_tsla)+log(Open_appl)+log(Open_gld)+log(Open_fb)+log(Open_amz))/5), colour="green")
-
-#crypto currencies
-
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/DOGE-USD.csv", dl, method = "curl")
-doge <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-doge <- doge %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% filter(Open!="null") %>% mutate(Open_doge= as.numeric(Open)) %>% select(date,Open_doge)
-
-
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/ETH-USD.csv", dl, method = "curl")
-ethereum <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-ethereum  <- ethereum %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17') %>% filter(Open!="null") %>% mutate(Open_eth= as.numeric(Open)) %>% select(date,Open_eth)
-view(ethereum)
-
-dl <- tempfile()
-download.file("https://raw.githubusercontent.com/MatthieuvdSlikke/DataScience_Crytpo_HarvardX-ML/main/DataSets/LTC-USD.csv", dl, method = "curl")
-litecoin <- read.csv(file = dl, header = TRUE, stringsAsFactors = FALSE)
-litecoin <- litecoin %>% mutate(date=as.Date(Date)) %>% filter(date >= '2015-01-01') %>%
-  filter(date <= '2021-04-17')  %>% filter(Open!="null") %>% mutate(Open_ltc= as.numeric(Open)) %>% select(date,Open_ltc)
-
-crypto <- right_join(doge, ethereum, by='date') %>% left_join(.,litecoin, by='date')
-crypto <- right_join(bitcoin%>%select(date,Open), crypto, by='date')
-view(crypto)
-cor(x=log(crypto$Open),y=log(crypto$Open_doge))
-cor(x=log(crypto$Open),y=log(crypto$Open_eth))
-cor(x=log(crypto$Open),y=log(crypto$Open_ltc))
-cor(x=log(crypto$Open),y=(log(crypto$Open_doge)+log(crypto$Open_eth)+log(crypto$Open_ltc))/3)
-
-cor(x=crypto$Open,y=crypto$Open_doge)
-cor(x=crypto$Open,y=crypto$Open_eth)
-cor(x=log(crypto$Open),y=log(crypto$Open_ltc)
-cor(x=crypto$Open,y=(crypto$Open_doge+crypto$Open_eth+crypto$Open_ltc)/3)
-
-
-#they almost have the exact same line and peaks are shifted to the right for the green line
-crypto %>% ggplot(aes(x=date)) + geom_line(aes(y=log(Open)), colour="red") + geom_line(aes(y=(log(Open_doge)+log(Open_eth)+log(Open_ltc))/3), colour="green")
-
+rmse_results <- data_frame(method = c("GARCH(1,1) model",
+                                         "Linear Regression + GARCH(1,1) model ",
+                                         "Random Forest+ GARCH(1,1) model "),
+                              RMSE = c(RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_garch_prediction),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_lm),
+                                               RMSE(true_volatility_vs_prediction$vol_bitcoin,true_volatility_vs_prediction$vol_bitcoin_rf)))
+rmse_results %>% knitr::kable()
